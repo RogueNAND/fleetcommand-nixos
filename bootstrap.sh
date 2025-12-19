@@ -128,12 +128,11 @@ ensure_repo() {
     msg "Cloning base config repo into $TARGET_ETC..."
     git clone "$REPO_URL" "$TARGET_ETC"
   else
-    msg "/etc/nixos is already a git repo."
-    local pull
-    read_tty pull "Pull latest changes from origin? [y/N]: " "N"
-    if [[ "$pull" =~ ^[Yy]$ ]]; then
+    msg "/etc/nixos is already a git repo. Manually run git pull to update."
+    local cont
+    read_tty cont "Continue? [y/N]: " "N"
+    if [[ "$cont" =~ ^[Yy]$ ]]; then
       msg "Pulling latest changes..."
-      (cd "$TARGET_ETC" && git pull --ff-only || true)
     fi
   fi
 

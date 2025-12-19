@@ -98,6 +98,12 @@ in
     hibernate.enable = false;
   };
 
+  powerManagement.cpuFreqGovernor = "performance";  # CPU power saving
+  boot.kernelParams = [
+    "pcie_aspm=off"  # PCIE power saving
+    "usbcore.autosuspend=-1"  # USB suspend
+  ];
+
 
   ##################
   ### Networking ###
@@ -113,6 +119,48 @@ in
       "interface-name:docker0"
       "interface-name:br-*"
       "interface-name:veth*"
+    ];
+
+    dispatcherScripts = [
+      # Tailscale UDP tweak whenever network is connected
+      {
+        source = pkgs.writeShellScript "50-fcav-tailscale-udp-gro" ''
+          set -euo pipefail
+
+          # NM passes: $1=interface, $2=event
+          case "''${2:-}" in
+            up|dhcp4-change|dhcp6-change|connectivity-change) ;;
+            *) exit 0 ;;
+          esac
+
+          NETDEV="$(ip route show default 0.0.0.0/0 2>/dev/null | ${pkgs.gawk}/bin/awk '/default/ {print $5; exit}')"
+          [ -n "$NETDEV" ] || exit 0
+
+          ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off || true
+        '';
+      }
+
+      # Disable EEE on the interface that just came up (deterministic per-port)
+      {
+        source = pkgs.writeShellScript "50-fcav-disable-eee" ''
+          set -euo pipefail
+
+          IFACE="''${1:-}"
+          EVENT="''${2:-}"
+
+          case "$EVENT" in
+            up|dhcp4-change|dhcp6-change|connectivity-change) ;;
+            *) exit 0 ;;
+          esac
+
+          # Skip obvious virtual interfaces
+          case "$IFACE" in
+            lo|tailscale0|docker0|br-*|veth*|virbr*|wg*|zt*|tun*|tap*) exit 0 ;;
+          esac
+
+          ${pkgs.ethtool}/bin/ethtool --set-eee "$IFACE" eee off 2>/dev/null || true
+        '';
+      }
     ];
   };
 
@@ -149,6 +197,7 @@ in
     tailscale
     iwd  # wifi tools
     cockpit
+    pkgs.ethtool
   ];
 
   services.cockpit = {
@@ -239,6 +288,36 @@ systemd.services.fcav-tailscale-up = lib.mkIf ts.enable {
         echo "tailscale up failed; retrying with --reset"
         tailscale up --reset ${lib.optionalString (tsAuthFile != null) "--authkey file:$AUTH"} ${tsFlagsStr}
       fi
+    '';
+  };
+
+  systemd.services.fcav-tailscale-udp-gro-tune = {
+    description = "FCAV: tune NIC UDP GRO settings for Tailscale exit/subnet routing";
+    after = [ "network.target" ];
+    wants = [ "network.target" ];
+    wantedBy = [ "multi-user.target" ];
+
+    serviceConfig = {Type = "oneshot";};
+
+    path = [ pkgs.iproute2 pkgs.ethtool pkgs.coreutils pkgs.gawk ];
+
+    script = ''
+      set -euo pipefail
+
+      # Wait up to 60s for a default route to appear
+      for i in $(seq 1 30); do
+        NETDEV="$(ip route show default 0.0.0.0/0 2>/dev/null | ${pkgs.gawk}/bin/awk '/default/ {print $5; exit}')"
+        [ -n "$NETDEV" ] && break
+        sleep 2
+      done
+
+      if [ -z "${NETDEV:-}" ]; then
+        echo "No default route found; skipping UDP GRO tuning."
+        exit 0
+      fi
+
+      echo "Applying Tailscale UDP GRO tuning on $NETDEV"
+      ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off || true
     '';
   };
 

@@ -208,8 +208,8 @@ ensure_host_nix() {
       "--ssh"
       "--advertise-exit-node"
       "--hostname=\${config.networking.hostName}"
-      # "--advertise-routes=${lan_subnet}"          # direct LAN route (not recommended with overlaps)
-      # "--advertise-routes=100.64.42.0/24"         # advertise virtual subnet instead
+      # "--advertise-routes=\${config.fcav.virtualSubnet.virtualSubnet}"  # advertise virtual subnet
+      # "--advertise-routes=\${config.fcav.virtualSubnet.localSubnet}"                         # direct LAN route (not recommended with overlaps)
     ];
   };
 

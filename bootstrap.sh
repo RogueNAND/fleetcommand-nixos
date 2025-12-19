@@ -205,7 +205,7 @@ ensure_host_nix() {
 
     extraUpFlags = [
       # "--login-server=https://headscale.example.com"  # For custom headscale server
-      "--ssh"
+      # "--ssh"
       "--advertise-exit-node"
       "--hostname=\${config.networking.hostName}"
       "--advertise-routes=\${config.fcav.virtualSubnet.virtualSubnet}"  # advertise virtual subnet

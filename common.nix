@@ -235,7 +235,10 @@ systemd.services.fcav-tailscale-up = lib.mkIf ts.enable {
       done
 
       echo "Running: tailscale up ${lib.optionalString (tsAuthFile != null) "--authkey file:$AUTH"} ${tsFlagsStr}"
-      tailscale up ${lib.optionalString (tsAuthFile != null) "--authkey file:$AUTH"} ${tsFlagsStr}
+      if ! tailscale up ${lib.optionalString (tsAuthFile != null) "--authkey file:$AUTH"} ${tsFlagsStr}; then
+        echo "tailscale up failed; retrying with --reset"
+        tailscale up --reset ${lib.optionalString (tsAuthFile != null) "--authkey file:$AUTH"} ${tsFlagsStr}
+      fi
     '';
   };
 

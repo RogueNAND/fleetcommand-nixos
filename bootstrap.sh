@@ -191,25 +191,20 @@ ensure_host_nix() {
   time.timeZone = "America/New_York";
   zramSwap.memoryPercent = 50;
 
-  fcav.virtualSubnet = {
+  fcav.vpn = {
     enable = true;
+    # loginServer = "https://headscale.example.com";  # For custom headscale server (optional)
+    ssh = false;
+    exitNode = true;
+
+    # LAN routing
     # lanInterface = "${lan_if}";  # defaults to "auto"
-    localSubnet = "${lan_subnet}";
-    virtualSubnet = "10.255.0.0/24";  # TODO: adjust per site
-    lanToTailnet = false;  # false = tailnet->LAN only; true = allow LAN->tailnet
-  };
-
-  services.tailscale = {
-    enable = true;
-
-    extraUpFlags = [
-      # "--login-server=https://headscale.example.com"  # For custom headscale server
-      # "--ssh"
-      "--advertise-exit-node"
-      "--hostname=\${config.networking.hostName}"
-      "--advertise-routes=\${config.fcav.virtualSubnet.virtualSubnet}"  # advertise virtual subnet
-      # "--advertise-routes=\${config.fcav.virtualSubnet.localSubnet}"    # direct LAN route (not recommended with overlaps)
-    ];
+    mode = "4via6";  # "direct" or "4via6"
+    advertiseRoutes = [
+      # "fd7a:115c:a1e0:ab12::/64"
+      # "192.168.10.0/24"
+    ]
+    # Be sure to allow routes and configure ACL's in the tailscale admin panel!
   };
 
   system.stateVersion = "25.11";

@@ -73,8 +73,8 @@ run_in_tty() {
 }
 
 TARGET_ETC="/etc/nixos"
-REPO_URL="https://github.com/roguenand/fleetcommandav-nixos.git"
-SECRET_PATH="/var/lib/fcav/secrets"
+REPO_URL="https://github.com/roguenand/fleetcommand-nixos.git"
+SECRET_PATH="/var/lib/fleetcommand/secrets"
 AUTH_FILE="${SECRET_PATH}/tailscale-authkey"
 
 HOSTNAME=""
@@ -191,7 +191,7 @@ ensure_host_nix() {
   time.timeZone = "America/New_York";
   zramSwap.memoryPercent = 50;
 
-  fcav.vpn = {
+  fleetcommand.vpn = {
     enable = true;
     # loginServer = "https://headscale.example.com";  # For custom headscale server (optional)
     ssh = false;

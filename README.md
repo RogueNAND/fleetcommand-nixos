@@ -1,5 +1,5 @@
-# fleetcommandav-nixos
-Hardened OS for hosting fleetcommandav
+# fleetcommand-nixos
+Opinionated NixOS appliance configuration
 
 # NixOS Installation (via GUI installer)
 - User setup
@@ -14,5 +14,5 @@ Hardened OS for hosting fleetcommandav
 - Run bootstrap.sh (this repository)
 
 ```bash
-curl -L https://raw.githubusercontent.com/roguenand/fleetcommandav-nixos/main/bootstrap.sh | sudo bash -s
+curl -L https://raw.githubusercontent.com/roguenand/fleetcommand-nixos/main/bootstrap.sh | sudo bash -s
 ```

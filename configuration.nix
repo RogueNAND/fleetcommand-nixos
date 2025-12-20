@@ -5,6 +5,6 @@
     ./hardware-configuration.nix
     ./common.nix
     ./host.nix
-    ./fcav-vpn.nix
+    ./fleetcommand-vpn.nix
   ];
 }

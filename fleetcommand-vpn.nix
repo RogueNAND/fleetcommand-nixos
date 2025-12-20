@@ -3,7 +3,7 @@
 let
   inherit (lib) mkIf mkOption mkEnableOption types optional optionalString concatStringsSep escapeShellArg;
 
-  cfg = config.fcav.vpn;
+  cfg = config.fleetcommand.vpn;
 
   routesFlags =
     lib.concatMap (r: [ "--advertise-routes=${r}" ]) (cfg.advertiseRoutes or []);
@@ -20,12 +20,12 @@ let
 
   upFlagsStr = concatStringsSep " " (map escapeShellArg upFlags);
 
-  authFile = "/var/lib/fcav/secrets/tailscale-authkey";
+  authFile = "/var/lib/fleetcommand/secrets/tailscale-authkey";
   authArg = "--authkey file:${escapeShellArg authFile}";
 in
 {
-  options.fcav.vpn = {
-    enable = mkEnableOption "FCAV VPN (Tailscale/Headscale)";
+  options.fleetcommand.vpn = {
+    enable = mkEnableOption "Appliance VPN (Tailscale/Headscale)";
 
     loginServer = mkOption {
       type = types.nullOr types.str;
@@ -48,11 +48,11 @@ in
     assertions = [
       {
         assertion = cfg.exitNode || (cfg.advertiseRoutes != []);
-        message = "fcav.vpn: set exitNode=true and/or provide advertiseRoutes.";
+        message = "fleetcommand.vpn: set exitNode=true and/or provide advertiseRoutes.";
       }
     ];
 
-    # tailscaled daemon enabled; the "up" flags are handled by fcav-tailscale-up service
+    # tailscaled daemon enabled; the "up" flags are handled by fleetcommand-tailscale-up service
     services.tailscale.enable = true;
     services.tailscale.useRoutingFeatures =
       if cfg.exitNode && (cfg.advertiseRoutes != []) then "both"
@@ -63,8 +63,8 @@ in
     services.tailscale.authKeyFile = authFile;
 
     # Run tailscale up deterministically each boot (with --reset fallback)
-    systemd.services.fcav-tailscale-up = {
-      description = "FCAV: run tailscale up with config-derived flags";
+    systemd.services.fleetcommand-tailscale-up = {
+      description = "Fleetcommand appliance: run tailscale up with config-derived flags";
       after = [ "network-online.target" "tailscaled.service" ];
       wants = [ "network-online.target" "tailscaled.service" ];
       wantedBy = [ "multi-user.target" ];
@@ -98,8 +98,8 @@ in
     };
 
     # Tweak UDP for optimal performance
-    systemd.services.fcav-tailscale-udp-gro-tune = {
-      description = "FCAV: tune NIC UDP GRO settings for Tailscale exit/subnet routing";
+    systemd.services.fleetcommand-tailscale-udp-gro-tune = {
+      description = "Fleetcommand appliance: tune NIC UDP GRO settings for Tailscale exit/subnet routing";
       after = [ "network.target" ];
       wants = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];

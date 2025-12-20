@@ -34,12 +34,12 @@ in
   ############
 
 
-  users.users.fcav = {
+  users.users.fleetcommand = {
     isNormalUser = true;
     uid = 1000;
-    description = "fcav";
+    description = "fleetcommand";
     extraGroups = [ "networkmanager" "wheel" "docker" ];
-    initialPassword = "fcav";
+    initialPassword = "fleetcommand";
   };
 
   security.sudo.enable = true;
@@ -124,7 +124,7 @@ in
     dispatcherScripts = [
       # Tailscale UDP tweak whenever network is connected
       {
-        source = pkgs.writeShellScript "50-fcav-tailscale-udp-gro" ''
+        source = pkgs.writeShellScript "50-fleetcommand-tailscale-udp-gro" ''
           set -euo pipefail
 
           # NM passes: $1=interface, $2=event
@@ -142,7 +142,7 @@ in
 
       # Disable EEE on the interface that just came up (deterministic per-port)
       {
-        source = pkgs.writeShellScript "50-fcav-disable-eee" ''
+        source = pkgs.writeShellScript "50-fleetcommand-disable-eee" ''
           set -euo pipefail
 
           IFACE="''${1:-}"
@@ -223,8 +223,8 @@ in
 
   # Make sure base directory exists
   systemd.tmpfiles.rules = [
-    "d /srv 0755 fcav users -"
-    "d /var/lib/fcav/secrets 0700 root root -"
+    "d /srv 0755 fleetcommand users -"
+    "d /var/lib/fleetcommand/secrets 0700 root root -"
   ];
 
   services.xserver.enable = false;

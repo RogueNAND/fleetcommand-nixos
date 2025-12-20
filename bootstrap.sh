@@ -197,13 +197,11 @@ ensure_host_nix() {
     ssh = false;
     exitNode = true;
 
-    # LAN routing
-    # lanInterface = "${lan_if}";  # defaults to "auto"
-    mode = "4via6";  # "direct" or "4via6"
+    # run "tailscale debug via [site ID] [v4 subnet]" to generate tailnet ipv6 address
     advertiseRoutes = [
-      # "fd7a:115c:a1e0:ab12::/64"
-      # "192.168.10.0/24"
-    ]
+      # e.g. "fd7a:115c:a1e0:ab12::/120"
+      # e.g. "192.168.10.0/24"
+    ];
     # Be sure to allow routes and configure ACL's in the tailscale admin panel!
   };
 

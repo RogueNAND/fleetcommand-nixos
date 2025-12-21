@@ -46,9 +46,6 @@ in
         description = "fleetcommand";
         extraGroups = [ "networkmanager" "wheel" "docker" ];
       }
-      // lib.optionalAttrs (sshKeysUrl != null) {
-        openssh.authorizedKeys.keyFiles = [ "/var/lib/fleetcommand/ssh/authorized_keys" ];
-      }
       // lib.optionalAttrs (builtins.pathExists userPasswordHashFile) {
         hashedPasswordFile = userPasswordHashFile;
       };
@@ -236,8 +233,7 @@ in
     systemd.tmpfiles.rules = [
       "d /srv 0755 fleetcommand users -"
       "d /var/lib/fleetcommand/secrets 0700 root root -"
-      "d /var/lib/fleetcommand/ssh 0700 fleetcommand users -"
-      "f /var/lib/fleetcommand/ssh/authorized_keys 0600 fleetcommand users -"
+      "d /home/fleetcommand/.ssh 0700 fleetcommand users -"
     ];
 
     systemd.services.fleetcommand-ssh-keys = lib.mkIf (sshKeysUrl != null) {
@@ -254,7 +250,7 @@ in
 
         tmp="$(mktemp)"
         ${pkgs.curl}/bin/curl -fsSL ${lib.escapeShellArg sshKeysUrl} -o "$tmp"
-        install -m 600 -o fleetcommand -g users "$tmp" /var/lib/fleetcommand/ssh/authorized_keys
+        install -m 600 -o fleetcommand -g users "$tmp" /home/fleetcommand/.ssh/authorized_keys
         rm -f "$tmp"
       '';
     };

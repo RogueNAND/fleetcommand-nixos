@@ -309,7 +309,7 @@ check_tailscale() {
     msg "Tailscale is waiting for authentication."
     msg "Displaying QR code from service logs:"
     echo ""
-    journalctl -u fleetcommand-tailscale-up -n 50 --no-pager
+    run_in_tty journalctl -u fleetcommand-tailscale-up -n 50 --no-pager
     echo ""
     msg "Scan the QR code above with your phone to authenticate."
     msg "Or check the login URL with:"

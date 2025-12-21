@@ -250,7 +250,7 @@ ensure_host_nix() {
   zramSwap.memoryPercent = 50;
 
   # Optional: pull SSH keys for the fleetcommand user from a URL
-  fleetcommand.sshKeysUrl = null;  # e.g. "https://github.com/youruser.keys"
+  fleetcommand.sshKeysUrl = null;  # e.g. "https://github.com/youruser.keys";
 
   fleetcommand.vpn = {
     enable = true;

@@ -78,8 +78,6 @@ SECRET_PATH="/var/lib/fleetcommand/secrets"
 USER_PASSWORD_HASH_FILE="${SECRET_PATH}/fleetcommand.passwd"
 
 HOSTNAME=""
-LAN_IFACE=""
-LAN_SUBNET=""
 
 # Functions --------------------------------------------------------------------
 
@@ -167,33 +165,6 @@ generate_hw_config() {
   nixos-generate-config --show-hardware-config > hardware-configuration.nix
 }
 
-detect_lan_defaults() {
-  # Try to detect the primary LAN interface (default route)
-  if ! have ip; then
-    return
-  fi
-
-  # Get default interface (the one with the default route)
-  local iface
-  iface=$(ip route show default 0.0.0.0/0 2>/dev/null | awk '/default/ {print $5; exit}')
-  if [[ -z "$iface" ]]; then
-    return
-  fi
-
-  # Try to get the subnet for that interface from the routing table
-  # Example line: "192.168.10.0/24 dev enp3s0 proto kernel scope link src 192.168.10.50"
-  local subnet
-  subnet=$(ip route show dev "$iface" 2>/dev/null | awk '/proto kernel/ && /src/ {print $1; exit}')
-
-  # If that fails, fall back to the addr list (gives IP/prefix, not network)
-  if [[ -z "$subnet" ]]; then
-    subnet=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4; exit}')
-  fi
-
-  LAN_IFACE="$iface"
-  LAN_SUBNET="$subnet"
-}
-
 prompt_user_password() {
   mkdir -p "$SECRET_PATH"
   chmod 700 "$SECRET_PATH"
@@ -232,44 +203,8 @@ prompt_user_password() {
 
 ensure_host_nix() {
   if [[ ! -f host.nix ]]; then
-    msg "host.nix not found, creating a new one."
-
-    # Defaults with fallbacks if detection failed
-    local lan_if="${LAN_IFACE:-enp3s0}"
-    local lan_subnet="${LAN_SUBNET:-192.168.10.0/24}"
-
-    cat > host.nix <<EOF
-# run "sudo nixos-rebuild switch" to rebuild system after modifying this file
-
-{ config, pkgs, lib, modulesPath, ... }:
-
-{
-  imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
-
-  networking.hostName = "${HOSTNAME}";
-  time.timeZone = "America/New_York";
-  zramSwap.memoryPercent = 50;
-
-  # Optional: pull SSH keys for the fleetcommand user from a URL
-  fleetcommand.sshKeysUrl = null;  # e.g. "https://github.com/youruser.keys";
-
-  fleetcommand.vpn = {
-    enable = true;
-    # loginServer = "https://headscale.example.com";  # For custom headscale server (optional)
-    ssh = false;
-    exitNode = true;
-
-    # run "tailscale debug via [site ID] [v4 subnet]" to generate tailnet ipv6 address
-    advertiseRoutes = [
-      # e.g. "fd7a:115c:a1e0:ab12::/120"
-      # e.g. "192.168.10.0/24"
-    ];
-    # Be sure to allow routes and configure ACL's in the tailscale admin panel!
-  };
-
-  system.stateVersion = "25.11";
-}
-EOF
+    msg "host.nix not found, creating from template."
+    sed "s/\${HOSTNAME}/${HOSTNAME}/g" host.nix.template > host.nix
   fi
 }
 
@@ -323,7 +258,6 @@ main() {
   determine_hostname "$@"
   ensure_repo
   generate_hw_config
-  detect_lan_defaults
   prompt_user_password
   ensure_host_nix
   edit_host_nix

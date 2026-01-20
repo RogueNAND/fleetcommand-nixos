@@ -1,0 +1,30 @@
+# run "sudo nixos-rebuild switch" to rebuild system after modifying this file
+
+{ config, pkgs, lib, modulesPath, ... }:
+
+{
+  imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
+
+  networking.hostName = "${HOSTNAME}";
+  time.timeZone = "America/New_York";
+  zramSwap.memoryPercent = 50;
+
+  # Optional: pull SSH keys for the fleetcommand user from a URL
+  fleetcommand.sshKeysUrl = null;  # e.g. "https://github.com/youruser.keys";
+
+  fleetcommand.vpn = {
+    enable = true;
+    # loginServer = "https://headscale.example.com";  # For custom headscale server (optional)
+    ssh = false;
+    exitNode = true;
+
+    # run "tailscale debug via [site ID] [v4 subnet]" to generate tailnet ipv6 address
+    advertiseRoutes = [
+      # e.g. "fd7a:115c:a1e0:ab12::/120"
+      # e.g. "192.168.10.0/24"
+    ];
+    # Be sure to allow routes and configure ACL's in the tailscale admin panel!
+  };
+
+  system.stateVersion = "25.11";
+}

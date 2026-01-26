@@ -246,7 +246,6 @@ in
       tailscale
       iwd  # wifi tools
       cockpit
-      pkgs
       ethtool
       btrfs-progs  # btrfs management tools
     ];

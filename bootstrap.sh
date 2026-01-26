@@ -78,6 +78,10 @@ SECRET_PATH="/var/lib/fleetcommand/secrets"
 USER_PASSWORD_HASH_FILE="${SECRET_PATH}/fleetcommand.passwd"
 
 HOSTNAME=""
+INSTALL_MODE=""  # "installer" or "installed"
+DISK=""
+EFI=""
+ROOT=""
 
 # Functions --------------------------------------------------------------------
 
@@ -91,11 +95,25 @@ check_shell_and_root() {
   fi
 }
 
+detect_environment() {
+  # Detect if running in installer or on an installed system
+  # /etc/NIXOS exists only on the installer ISO, not on installed systems
+  if [[ -f /etc/NIXOS ]]; then
+    INSTALL_MODE="installer"
+  elif [[ -f /etc/nixos/configuration.nix ]] && systemctl is-system-running &>/dev/null; then
+    INSTALL_MODE="installed"
+  else
+    INSTALL_MODE="installer"
+  fi
+  msg "Detected environment: ${INSTALL_MODE}"
+}
+
 check_dependencies() {
-  # git and openssl might not be on a fresh NixOS install, so install them if needed
+  # Check and install missing dependencies based on install mode
   local needs_install=false
   local to_install=()
 
+  # Common dependencies
   if ! have git; then
     needs_install=true
     to_install+=("nixos.git")
@@ -106,6 +124,24 @@ check_dependencies() {
     to_install+=("nixos.openssl")
   fi
 
+  # Installer-specific dependencies
+  if [[ "$INSTALL_MODE" == "installer" ]]; then
+    if ! have parted; then
+      needs_install=true
+      to_install+=("nixos.parted")
+    fi
+
+    if ! have mkfs.btrfs; then
+      needs_install=true
+      to_install+=("nixos.btrfs-progs")
+    fi
+
+    if ! have wipefs; then
+      needs_install=true
+      to_install+=("nixos.util-linux")
+    fi
+  fi
+
   if [[ "$needs_install" = true ]]; then
     msg "Installing missing dependencies: ${to_install[*]}"
     nix-env -iA "${to_install[@]}"
@@ -113,13 +149,198 @@ check_dependencies() {
     exit 0
   fi
 
-  # Check remaining required commands
-  for bin in nixos-generate-config nixos-rebuild; do
+  # Verify required commands based on mode
+  local required_cmds=(nixos-generate-config git)
+  if [[ "$INSTALL_MODE" == "installer" ]]; then
+    required_cmds+=(parted mkfs.fat mkfs.btrfs btrfs wipefs lsblk nixos-install)
+  else
+    required_cmds+=(nixos-rebuild)
+  fi
+
+  for bin in "${required_cmds[@]}"; do
     if ! have "$bin"; then
-      die "Missing required command: $bin (this should be present on NixOS)"
+      die "Missing required command: $bin"
     fi
   done
 }
+
+# Installer functions ------------------------------------------------------------
+
+select_disk() {
+  msg "Available disks:"
+  echo ""
+  lsblk -o NAME,SIZE,MODEL,TYPE
+  echo ""
+
+  read_tty DISK "Enter target disk (e.g., /dev/nvme0n1 or /dev/sda): " ""
+
+  if [[ -z "$DISK" ]]; then
+    die "No disk specified."
+  fi
+
+  if [[ ! -b "$DISK" ]]; then
+    die "Invalid disk: $DISK is not a block device."
+  fi
+
+  # Determine partition naming convention based on device type
+  case "$DISK" in
+    /dev/nvme*|/dev/loop*|/dev/mmcblk*)
+      # NVMe, loop, and MMC devices use p1/p2 suffix
+      EFI="${DISK}p1"
+      ROOT="${DISK}p2"
+      ;;
+    *)
+      # SATA/SCSI devices use 1/2 suffix
+      EFI="${DISK}1"
+      ROOT="${DISK}2"
+      ;;
+  esac
+
+  msg "Selected disk: $DISK"
+  msg "Partitions will be: EFI=$EFI, ROOT=$ROOT"
+}
+
+confirm_destructive_operation() {
+  echo ""
+  echo -e "\e[31m========================================\e[0m"
+  echo -e "\e[31m        WARNING: DATA DESTRUCTION       \e[0m"
+  echo -e "\e[31m========================================\e[0m"
+  echo ""
+  echo "The following disk will be COMPLETELY ERASED:"
+  echo ""
+  lsblk -o NAME,SIZE,MODEL,FSTYPE,MOUNTPOINT "$DISK" 2>/dev/null || echo "  $DISK"
+  echo ""
+  echo -e "\e[31mALL DATA ON THIS DISK WILL BE PERMANENTLY LOST!\e[0m"
+  echo ""
+
+  local confirm
+  read_tty confirm "Type 'yes' to confirm destruction of $DISK: " ""
+
+  if [[ "$confirm" != "yes" ]]; then
+    die "Aborted by user."
+  fi
+}
+
+partition_disk() {
+  msg "Wiping existing partition table on $DISK..."
+  wipefs -a "$DISK"
+
+  msg "Creating GPT partition table..."
+  parted --script "$DISK" \
+    mklabel gpt \
+    mkpart ESP fat32 1MiB 513MiB \
+    set 1 esp on \
+    mkpart nixos btrfs 513MiB 100%
+
+  # Wait for partition devices to appear with retry loop
+  msg "Waiting for partition devices..."
+  local retries=0
+  local max_retries=10
+  while [[ $retries -lt $max_retries ]]; do
+    udevadm settle 2>/dev/null || true
+    if [[ -b "$EFI" ]] && [[ -b "$ROOT" ]]; then
+      break
+    fi
+    retries=$((retries + 1))
+    sleep 1
+  done
+
+  if [[ ! -b "$EFI" ]] || [[ ! -b "$ROOT" ]]; then
+    die "Partition devices not found after partitioning: $EFI, $ROOT"
+  fi
+
+  msg "Partitions created successfully."
+}
+
+format_partitions() {
+  msg "Formatting EFI partition ($EFI) as FAT32..."
+  mkfs.fat -F 32 -n BOOT "$EFI"
+
+  msg "Formatting root partition ($ROOT) as btrfs..."
+  mkfs.btrfs -f -L NIXOS "$ROOT"
+}
+
+create_btrfs_subvolumes() {
+  msg "Creating btrfs subvolumes..."
+
+  mount "$ROOT" /mnt
+  btrfs subvolume create /mnt/@
+  btrfs subvolume create /mnt/@nix
+  btrfs subvolume create /mnt/@home
+  umount /mnt
+
+  msg "Subvolumes created: @, @nix, @home"
+}
+
+mount_for_install() {
+  msg "Mounting filesystems for installation..."
+
+  # Mount root subvolume
+  mount -o subvol=@,compress=zstd,noatime "$ROOT" /mnt
+
+  # Create mount points
+  mkdir -p /mnt/{boot,nix,home}
+
+  # Mount EFI partition
+  mount -o umask=077 "$EFI" /mnt/boot
+
+  # Mount other subvolumes
+  mount -o subvol=@nix,compress=zstd,noatime "$ROOT" /mnt/nix
+  mount -o subvol=@home,compress=zstd,noatime "$ROOT" /mnt/home
+
+  msg "Filesystems mounted to /mnt."
+}
+
+clone_repo_to_mnt() {
+  TARGET_ETC="/mnt/etc/nixos"
+
+  msg "Cloning configuration repository to $TARGET_ETC..."
+  mkdir -p /mnt/etc
+  git clone "$REPO_URL" "$TARGET_ETC"
+
+  cd "$TARGET_ETC"
+}
+
+generate_hw_config_installer() {
+  msg "Generating hardware-configuration.nix..."
+  nixos-generate-config --root /mnt --show-hardware-config > "$TARGET_ETC/hardware-configuration.nix"
+}
+
+run_nixos_install() {
+  msg "Running nixos-install..."
+  nixos-install --no-root-passwd -I nixos-config="$TARGET_ETC/configuration.nix"
+}
+
+post_install_instructions() {
+  echo ""
+  echo -e "\e[32m========================================\e[0m"
+  echo -e "\e[32m        INSTALLATION COMPLETE!          \e[0m"
+  echo -e "\e[32m========================================\e[0m"
+  echo ""
+  echo "Next steps:"
+  echo "  1. Reboot into your new system: reboot"
+  echo "  2. Log in as 'fleetcommand' with the password you set"
+  echo "  3. Check Tailscale auth: sudo journalctl -u fleetcommand-tailscale-up"
+  echo ""
+  echo "Your configuration is at: /etc/nixos/"
+  echo "Hostname: $HOSTNAME"
+  echo ""
+}
+
+on_error_installer() {
+  local exit_code=$?
+  local line_no=${BASH_LINENO[0]:-?}
+  local cmd=${BASH_COMMAND:-?}
+  echo -e "\e[31mError: command failed (exit=$exit_code) at line $line_no: $cmd\e[0m" >&2
+
+  # Attempt cleanup
+  echo "Attempting to unmount filesystems..."
+  umount -R /mnt 2>/dev/null || true
+
+  exit "$exit_code"
+}
+
+# Reconfigure functions ----------------------------------------------------------
 
 determine_hostname() {
   if [[ $# -ge 1 && -n "${1:-}" ]]; then
@@ -160,15 +381,19 @@ ensure_repo() {
   cd "$TARGET_ETC"
 }
 
-generate_hw_config() {
-  msg "Generating hardware-configuration.nix..."
-  nixos-generate-config --show-hardware-config > hardware-configuration.nix
-}
-
 prompt_user_password() {
+  # Set paths based on install mode
+  if [[ "$INSTALL_MODE" == "installer" ]]; then
+    SECRET_PATH="/mnt/var/lib/fleetcommand/secrets"
+  else
+    SECRET_PATH="/var/lib/fleetcommand/secrets"
+  fi
+  USER_PASSWORD_HASH_FILE="${SECRET_PATH}/fleetcommand.passwd"
+
   mkdir -p "$SECRET_PATH"
   chmod 700 "$SECRET_PATH"
 
+  # Offer to reuse existing hash (only relevant for reconfigure mode)
   if [[ -f "$USER_PASSWORD_HASH_FILE" ]]; then
     local reuse="Y"
     read_tty reuse "Password hash exists. Reuse it? [Y/n]: " "Y"
@@ -199,6 +424,7 @@ prompt_user_password() {
   user_password_hash="$(printf '%s' "$pass1" | openssl passwd -6 -stdin)"
   printf '%s\n' "$user_password_hash" > "$USER_PASSWORD_HASH_FILE"
   chmod 600 "$USER_PASSWORD_HASH_FILE"
+  msg "Password hash saved."
 }
 
 ensure_host_nix() {
@@ -209,7 +435,7 @@ ensure_host_nix() {
 }
 
 edit_host_nix() {
-  msg "Opening /etc/nixos/host.nix in an editor. Edit as needed, then save & exit."
+  msg "Opening ${TARGET_ETC}/host.nix in an editor. Edit as needed, then save & exit."
   if [[ -n "${EDITOR:-}" ]] && command -v "$EDITOR" >/dev/null 2>&1; then
     run_in_tty "$EDITOR" host.nix
   else
@@ -257,17 +483,40 @@ check_tailscale() {
 
 main() {
   check_shell_and_root
+  detect_environment
   check_dependencies
-  determine_hostname "$@"
-  ensure_repo
-  generate_hw_config
-  prompt_user_password
-  ensure_host_nix
-  edit_host_nix
-  rebuild_system
-  check_tailscale
 
-  msg "Bootstrap complete for ${HOSTNAME}."
+  if [[ "$INSTALL_MODE" == "installer" ]]; then
+    # Fresh installation from NixOS installer ISO
+    trap on_error_installer ERR
+
+    select_disk
+    confirm_destructive_operation
+    partition_disk
+    format_partitions
+    create_btrfs_subvolumes
+    mount_for_install
+    clone_repo_to_mnt
+    generate_hw_config_installer
+    determine_hostname "$@"
+    prompt_user_password
+    ensure_host_nix
+    edit_host_nix
+    run_nixos_install
+    post_install_instructions
+
+  else
+    # Reconfigure existing NixOS installation
+    determine_hostname "$@"
+    ensure_repo
+    prompt_user_password
+    ensure_host_nix
+    edit_host_nix
+    rebuild_system
+    check_tailscale
+
+    msg "Bootstrap complete for ${HOSTNAME}."
+  fi
 }
 
 main "$@"
